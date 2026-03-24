@@ -23,7 +23,7 @@ function queryAll(sql, params = []) {
 router.get('/', (req, res) => {
   try {
     const rows = queryAll(
-      `SELECT key, value FROM settings WHERE key IN ('imap_host', 'imap_port', 'imap_user', 'imap_pass')`
+      `SELECT key, value FROM settings WHERE key IN ('imap_host', 'imap_port', 'imap_user', 'imap_pass', 'ms_access_token')`
     );
 
     const settings = {};
@@ -38,9 +38,10 @@ router.get('/', (req, res) => {
       imap_port: settings.imap_port || process.env.IMAP_PORT || '993',
       imap_user: settings.imap_user || process.env.IMAP_USER || '',
       imap_pass: settings.imap_pass || (process.env.IMAP_PASS ? '••••••••' : ''),
+      is_microsoft_oauth: !!settings.ms_access_token,
       has_credentials: !!(
         (settings.imap_user || process.env.IMAP_USER) &&
-        (settings.imap_pass || process.env.IMAP_PASS)
+        (settings.imap_pass || process.env.IMAP_PASS || settings.ms_access_token)
       ),
     };
 
@@ -115,9 +116,9 @@ router.post('/test', async (req, res) => {
   const { getImapConfig } = require('../config/imap');
 
   try {
-    const config = getImapConfig();
+    const config = await getImapConfig();
 
-    if (!config.auth.user || !config.auth.pass) {
+    if (!config.auth.user || (!config.auth.pass && !config.auth.accessToken)) {
       return res.status(400).json({
         success: false,
         message: 'IMAP credentials not configured. Please save your settings first.',

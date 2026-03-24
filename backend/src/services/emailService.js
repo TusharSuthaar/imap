@@ -80,9 +80,9 @@ function storeEmail(parsedEmail) {
  * Fetch the last N unseen emails from the IMAP inbox.
  */
 async function fetchEmails(limit = 10) {
-  const imapConfig = getImapConfig();
+  const imapConfig = await getImapConfig();
 
-  if (!imapConfig.auth.user || !imapConfig.auth.pass) {
+  if (!imapConfig.auth.user || (!imapConfig.auth.pass && !imapConfig.auth.accessToken)) {
     throw new Error(
       'IMAP credentials not configured. Go to Settings to add your email account.'
     );

@@ -14,8 +14,19 @@ export default function Settings() {
   const [message, setMessage] = useState(null);
   const [hasCredentials, setHasCredentials] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [isMicrosoftOauth, setIsMicrosoftOauth] = useState(false);
 
   useEffect(() => {
+    // Check URL for MSAL OAuth results
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('msal_success') === 'true') {
+      setMessage({ type: 'success', text: 'Microsoft Account connected successfully!' });
+      window.history.replaceState({}, document.title, window.location.pathname);
+    } else if (params.get('msal_error') === 'true') {
+      setMessage({ type: 'error', text: 'Failed to connect Microsoft Account.' });
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+
     (async () => {
       try {
         const res = await api.get('/settings');
@@ -27,6 +38,7 @@ export default function Settings() {
           imap_pass: s.imap_pass || '',
         });
         setHasCredentials(s.has_credentials);
+        setIsMicrosoftOauth(s.is_microsoft_oauth || false);
       } catch (err) {
         // Settings table may not exist yet
       } finally {
@@ -48,6 +60,9 @@ export default function Settings() {
       const res = await api.post('/settings', form);
       setMessage({ type: 'success', text: res.message });
       setHasCredentials(true);
+      if (form.imap_host !== 'outlook.office365.com') {
+        setIsMicrosoftOauth(false);
+      }
     } catch (err) {
       setMessage({ type: 'error', text: err.message });
     } finally {
@@ -68,6 +83,10 @@ export default function Settings() {
     }
   };
 
+  const handleMicrosoftConnect = () => {
+    window.location.href = 'http://localhost:5000/api/auth/microsoft';
+  };
+
   if (loading) {
     return (
       <div className="animate-fade-in">
@@ -79,7 +98,6 @@ export default function Settings() {
 
   return (
     <div className="animate-fade-in">
-      {/* Page Header */}
       <div className="mb-8">
         <h1 className="text-2xl font-bold" style={{ color: 'var(--color-text)' }}>
           Email Settings
@@ -89,7 +107,6 @@ export default function Settings() {
         </p>
       </div>
 
-      {/* Status Badge */}
       <div
         className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium mb-6"
         style={{
@@ -102,10 +119,9 @@ export default function Settings() {
           className="w-1.5 h-1.5 rounded-full"
           style={{ background: hasCredentials ? 'var(--color-accent-green)' : 'var(--color-accent-amber)' }}
         />
-        {hasCredentials ? 'Account connected' : 'No account configured'}
+        {hasCredentials ? (isMicrosoftOauth ? 'Microsoft Account connected' : 'Account connected') : 'No account configured'}
       </div>
 
-      {/* Settings Form */}
       <form onSubmit={handleSave} className="max-w-2xl">
         <div
           className="rounded-2xl p-6"
@@ -137,7 +153,6 @@ export default function Settings() {
           </div>
 
           <div className="space-y-4">
-            {/* Provider Selector */}
             <div>
               <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>
                 Email Provider
@@ -182,154 +197,176 @@ export default function Settings() {
               </div>
             </div>
 
-            {/* Host + Port Row */}
-            <div className="grid grid-cols-3 gap-4">
-              <div className="col-span-2">
-                <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>
-                  IMAP Host
-                </label>
-                <input
-                  id="imap-host"
-                  type="text"
-                  name="imap_host"
-                  value={form.imap_host}
-                  onChange={handleChange}
-                  placeholder="imap.gmail.com"
-                  className="w-full px-4 py-2.5 rounded-xl text-sm outline-none transition-all duration-200"
-                  style={{
-                    background: 'var(--color-surface)',
-                    border: '1px solid var(--color-border)',
-                    color: 'var(--color-text)',
-                  }}
-                  onFocus={(e) => (e.target.style.borderColor = 'var(--color-brand)')}
-                  onBlur={(e) => (e.target.style.borderColor = 'var(--color-border)')}
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>
-                  Port
-                </label>
-                <input
-                  id="imap-port"
-                  type="number"
-                  name="imap_port"
-                  value={form.imap_port}
-                  onChange={handleChange}
-                  placeholder="993"
-                  className="w-full px-4 py-2.5 rounded-xl text-sm outline-none transition-all duration-200"
-                  style={{
-                    background: 'var(--color-surface)',
-                    border: '1px solid var(--color-border)',
-                    color: 'var(--color-text)',
-                  }}
-                  onFocus={(e) => (e.target.style.borderColor = 'var(--color-brand)')}
-                  onBlur={(e) => (e.target.style.borderColor = 'var(--color-border)')}
-                />
-              </div>
-            </div>
-
-            {/* Email */}
-            <div>
-              <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>
-                Email Address
-              </label>
-              <input
-                id="imap-user"
-                type="email"
-                name="imap_user"
-                value={form.imap_user}
-                onChange={handleChange}
-                placeholder={
-                  form.imap_host === 'outlook.office365.com'
-                    ? 'your-email@outlook.com'
-                    : form.imap_host === 'imap.mail.yahoo.com'
-                    ? 'your-email@yahoo.com'
-                    : 'your-email@gmail.com'
-                }
-                className="w-full px-4 py-2.5 rounded-xl text-sm outline-none transition-all duration-200"
-                style={{
-                  background: 'var(--color-surface)',
-                  border: '1px solid var(--color-border)',
-                  color: 'var(--color-text)',
-                }}
-                onFocus={(e) => (e.target.style.borderColor = 'var(--color-brand)')}
-                onBlur={(e) => (e.target.style.borderColor = 'var(--color-border)')}
-              />
-            </div>
-
-            {/* App Password */}
-            <div>
-              <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>
-                {form.imap_host === 'outlook.office365.com' ? 'Password' : 'App Password'}
-              </label>
-              <div className="relative">
-                <input
-                  id="imap-pass"
-                  type={showPassword ? 'text' : 'password'}
-                  name="imap_pass"
-                  value={form.imap_pass}
-                  onChange={handleChange}
-                  placeholder={
-                    form.imap_host === 'outlook.office365.com'
-                      ? 'Enter your Outlook password'
-                      : 'Enter your app password'
-                  }
-                  className="w-full px-4 py-2.5 pr-12 rounded-xl text-sm outline-none transition-all duration-200"
-                  style={{
-                    background: 'var(--color-surface)',
-                    border: '1px solid var(--color-border)',
-                    color: 'var(--color-text)',
-                  }}
-                  onFocus={(e) => (e.target.style.borderColor = 'var(--color-brand)')}
-                  onBlur={(e) => (e.target.style.borderColor = 'var(--color-border)')}
-                />
+            {form.imap_host === 'outlook.office365.com' ? (
+              <div className="mt-4 p-4 rounded-xl border border-blue-500/20 bg-blue-500/5">
+                <h3 className="text-sm font-semibold mb-2" style={{ color: 'var(--color-text)' }}>Microsoft OAuth Setup</h3>
+                <p className="text-xs mb-4" style={{ color: 'var(--color-text-secondary)' }}>
+                  Microsoft requires OAuth for connecting to Outlook IMAP. Connect your Microsoft account to securely sync emails.
+                </p>
                 <button
                   type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded cursor-pointer"
-                  style={{ color: 'var(--color-text-secondary)' }}
+                  onClick={handleMicrosoftConnect}
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all cursor-pointer shadow-sm hover:shadow-md"
+                  style={{
+                    backgroundColor: '#0078D4',
+                    color: 'white',
+                    border: 'none',
+                  }}
                 >
-                  {showPassword ? (
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                        d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.878 9.878L3 3m6.878 6.878L21 21" />
-                    </svg>
-                  ) : (
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                        d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                        d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                    </svg>
-                  )}
+                  <svg className="w-5 h-5" viewBox="0 0 21 21" fill="currentColor">
+                    <path fill="#f3f3f3" d="M0 0h10v10H0z"/>
+                    <path fill="#f3f3f3" d="M11 0h10v10H11z"/>
+                    <path fill="#f3f3f3" d="M0 11h10v10H0z"/>
+                    <path fill="#f3f3f3" d="M11 11h10v10H11z"/>
+                    <path fill="currentColor" d="M1 1h8v8H1z M11 1h8v8H11z M1 11h8v8H1z M11 11h8v8H11z"/>
+                  </svg>
+                  {isMicrosoftOauth ? 'Reconnect Microsoft Account' : 'Connect Microsoft Account'}
                 </button>
-              </div>
-              <p className="text-xs mt-1.5" style={{ color: 'var(--color-text-secondary)' }}>
-                {form.imap_host === 'outlook.office365.com' ? (
-                  <>Use your regular Outlook/Microsoft password. Make sure IMAP is enabled in Outlook settings.</>
-                ) : form.imap_host === 'imap.mail.yahoo.com' ? (
-                  <>Generate an App Password from Yahoo Account Security settings.</>
-                ) : (
-                  <>
-                    For Gmail, use an{' '}
-                    <a
-                      href="https://myaccount.google.com/apppasswords"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="underline"
-                      style={{ color: 'var(--color-brand-light)' }}
-                    >
-                      App Password
-                    </a>
-                    , not your regular password
-                  </>
+                {isMicrosoftOauth && (
+                  <p className="text-xs mt-3 text-green-500 font-medium">
+                    ✓ Currently connected via Microsoft OAuth
+                  </p>
                 )}
-              </p>
-            </div>
+              </div>
+            ) : (
+              <>
+                <div className="grid grid-cols-3 gap-4 mt-4">
+                  <div className="col-span-2">
+                    <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>
+                      IMAP Host
+                    </label>
+                    <input
+                      id="imap-host"
+                      type="text"
+                      name="imap_host"
+                      value={form.imap_host}
+                      onChange={handleChange}
+                      placeholder="imap.gmail.com"
+                      className="w-full px-4 py-2.5 rounded-xl text-sm outline-none transition-all duration-200"
+                      style={{
+                        background: 'var(--color-surface)',
+                        border: '1px solid var(--color-border)',
+                        color: 'var(--color-text)',
+                      }}
+                      onFocus={(e) => (e.target.style.borderColor = 'var(--color-brand)')}
+                      onBlur={(e) => (e.target.style.borderColor = 'var(--color-border)')}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>
+                      Port
+                    </label>
+                    <input
+                      id="imap-port"
+                      type="number"
+                      name="imap_port"
+                      value={form.imap_port}
+                      onChange={handleChange}
+                      placeholder="993"
+                      className="w-full px-4 py-2.5 rounded-xl text-sm outline-none transition-all duration-200"
+                      style={{
+                        background: 'var(--color-surface)',
+                        border: '1px solid var(--color-border)',
+                        color: 'var(--color-text)',
+                      }}
+                      onFocus={(e) => (e.target.style.borderColor = 'var(--color-brand)')}
+                      onBlur={(e) => (e.target.style.borderColor = 'var(--color-border)')}
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>
+                    Email Address
+                  </label>
+                  <input
+                    id="imap-user"
+                    type="email"
+                    name="imap_user"
+                    value={form.imap_user}
+                    onChange={handleChange}
+                    placeholder={
+                      form.imap_host === 'imap.mail.yahoo.com'
+                        ? 'your-email@yahoo.com'
+                        : 'your-email@gmail.com'
+                    }
+                    className="w-full px-4 py-2.5 rounded-xl text-sm outline-none transition-all duration-200"
+                    style={{
+                      background: 'var(--color-surface)',
+                      border: '1px solid var(--color-border)',
+                      color: 'var(--color-text)',
+                    }}
+                    onFocus={(e) => (e.target.style.borderColor = 'var(--color-brand)')}
+                    onBlur={(e) => (e.target.style.borderColor = 'var(--color-border)')}
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>
+                    App Password
+                  </label>
+                  <div className="relative">
+                    <input
+                      id="imap-pass"
+                      type={showPassword ? 'text' : 'password'}
+                      name="imap_pass"
+                      value={form.imap_pass}
+                      onChange={handleChange}
+                      placeholder="Enter your app password"
+                      className="w-full px-4 py-2.5 pr-12 rounded-xl text-sm outline-none transition-all duration-200"
+                      style={{
+                        background: 'var(--color-surface)',
+                        border: '1px solid var(--color-border)',
+                        color: 'var(--color-text)',
+                      }}
+                      onFocus={(e) => (e.target.style.borderColor = 'var(--color-brand)')}
+                      onBlur={(e) => (e.target.style.borderColor = 'var(--color-border)')}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded cursor-pointer"
+                      style={{ color: 'var(--color-text-secondary)' }}
+                    >
+                      {showPassword ? (
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                            d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.878 9.878L3 3m6.878 6.878L21 21" />
+                        </svg>
+                      ) : (
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                            d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                            d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                        </svg>
+                      )}
+                    </button>
+                  </div>
+                  <p className="text-xs mt-1.5" style={{ color: 'var(--color-text-secondary)' }}>
+                    {form.imap_host === 'imap.mail.yahoo.com' ? (
+                      <>Generate an App Password from Yahoo Account Security settings.</>
+                    ) : (
+                      <>
+                        For Gmail, use an{' '}
+                        <a
+                          href="https://myaccount.google.com/apppasswords"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="underline"
+                          style={{ color: 'var(--color-brand-light)' }}
+                        >
+                          App Password
+                        </a>
+                        , not your regular password
+                      </>
+                    )}
+                  </p>
+                </div>
+              </>
+            )}
           </div>
 
-
-          {/* Info Box */}
           <div
             className="mt-6 px-4 py-3 rounded-xl text-xs flex items-start gap-2"
             style={{
@@ -349,7 +386,6 @@ export default function Settings() {
           </div>
         </div>
 
-        {/* Message Alert */}
         {message && (
           <div
             className="mt-4 px-4 py-3 rounded-xl text-sm animate-fade-in flex items-center gap-2"
@@ -373,48 +409,49 @@ export default function Settings() {
           </div>
         )}
 
-        {/* Action Buttons */}
         <div className="mt-6 flex items-center gap-3">
-          <button
-            id="save-settings-btn"
-            type="submit"
-            disabled={saving}
-            className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold text-white transition-all duration-300 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
-            style={{
-              background: saving
-                ? 'var(--color-surface-light)'
-                : 'linear-gradient(135deg, var(--color-brand) 0%, #8b5cf6 100%)',
-              boxShadow: saving ? 'none' : '0 4px 16px rgba(99,102,241,0.35)',
-            }}
-            onMouseEnter={(e) => {
-              if (!saving) e.currentTarget.style.transform = 'translateY(-1px)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.transform = 'translateY(0)';
-            }}
-          >
-            {saving ? (
-              <>
-                <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                </svg>
-                Saving…
-              </>
-            ) : (
-              <>
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                </svg>
-                Save Settings
-              </>
-            )}
-          </button>
+          {form.imap_host !== 'outlook.office365.com' && (
+            <button
+              id="save-settings-btn"
+              type="submit"
+              disabled={saving}
+              className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold text-white transition-all duration-300 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+              style={{
+                background: saving
+                  ? 'var(--color-surface-light)'
+                  : 'linear-gradient(135deg, var(--color-brand) 0%, #8b5cf6 100%)',
+                boxShadow: saving ? 'none' : '0 4px 16px rgba(99,102,241,0.35)',
+              }}
+              onMouseEnter={(e) => {
+                if (!saving) e.currentTarget.style.transform = 'translateY(-1px)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.transform = 'translateY(0)';
+              }}
+            >
+              {saving ? (
+                <>
+                  <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                  Saving…
+                </>
+              ) : (
+                <>
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                  </svg>
+                  Save Settings
+                </>
+              )}
+            </button>
+          )}
 
           <button
             id="test-connection-btn"
             type="button"
-            disabled={testing || !hasCredentials}
+            disabled={testing || (!hasCredentials && !isMicrosoftOauth)}
             onClick={handleTest}
             className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
             style={{
