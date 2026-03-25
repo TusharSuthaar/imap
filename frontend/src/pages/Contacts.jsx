@@ -25,10 +25,10 @@ export default function Contacts() {
     <div className="animate-fade-in">
       {/* Page Header */}
       <div className="mb-8">
-        <h1 className="text-2xl font-bold" style={{ color: 'var(--color-text)' }}>
+        <h1 className="text-2xl font-bold" style={{ color: 'var(--text)' }}>
           Contacts
         </h1>
-        <p className="text-sm mt-1" style={{ color: 'var(--color-text-secondary)' }}>
+        <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>
           Auto-discovered contacts from synced emails
         </p>
       </div>
@@ -39,7 +39,7 @@ export default function Contacts() {
           style={{
             background: 'rgba(251, 113, 133, 0.1)',
             border: '1px solid rgba(251, 113, 133, 0.25)',
-            color: 'var(--color-accent-rose)',
+            color: 'var(--danger)',
           }}
         >
           <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -60,15 +60,15 @@ export default function Contacts() {
         <div
           className="rounded-2xl px-6 py-16 text-center"
           style={{
-            background: 'var(--color-surface-card)',
-            border: '1px solid var(--color-border)',
+            background: 'var(--bg-white)',
+            border: '1px solid var(--border)',
           }}
         >
-          <svg className="w-12 h-12 mx-auto mb-3" style={{ color: 'var(--color-border)' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg className="w-12 h-12 mx-auto mb-3" style={{ color: 'var(--border)' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
               d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
           </svg>
-          <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
+          <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
             No contacts yet. Fetch emails from the Dashboard first.
           </p>
         </div>
@@ -80,18 +80,18 @@ export default function Contacts() {
               to={`/contacts/${contact.id}`}
               className="block rounded-2xl p-5 transition-all duration-300 animate-fade-in"
               style={{
-                background: 'var(--color-surface-card)',
-                border: '1px solid var(--color-border)',
+                background: 'var(--bg-white)',
+                border: '1px solid var(--border)',
                 textDecoration: 'none',
                 animationDelay: `${idx * 60}ms`,
               }}
               onMouseEnter={(e) => {
-                e.currentTarget.style.borderColor = 'var(--color-brand)';
+                e.currentTarget.style.borderColor = 'var(--brand)';
                 e.currentTarget.style.transform = 'translateY(-3px)';
                 e.currentTarget.style.boxShadow = '0 8px 24px rgba(99,102,241,0.12)';
               }}
               onMouseLeave={(e) => {
-                e.currentTarget.style.borderColor = 'var(--color-border)';
+                e.currentTarget.style.borderColor = 'var(--border)';
                 e.currentTarget.style.transform = 'translateY(0)';
                 e.currentTarget.style.boxShadow = 'none';
               }}
@@ -106,23 +106,23 @@ export default function Contacts() {
                   {(contact.name || contact.email).charAt(0).toUpperCase()}
                 </div>
                 <div className="min-w-0 flex-1">
-                  <h3 className="text-sm font-semibold truncate" style={{ color: 'var(--color-text)' }}>
+                  <h3 className="text-sm font-semibold truncate" style={{ color: 'var(--text)' }}>
                     {contact.name || contact.email.split('@')[0]}
                   </h3>
-                  <p className="text-xs truncate mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+                  <p className="text-xs truncate mt-0.5" style={{ color: 'var(--text-secondary)' }}>
                     {contact.email}
                   </p>
                   <div className="flex items-center gap-1.5 mt-3">
-                    <svg className="w-3.5 h-3.5" style={{ color: 'var(--color-brand-light)' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg className="w-3.5 h-3.5" style={{ color: 'var(--brand)' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
                         d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
                     </svg>
-                    <span className="text-xs font-medium" style={{ color: 'var(--color-brand-light)' }}>
+                    <span className="text-xs font-medium" style={{ color: 'var(--brand)' }}>
                       {contact.email_count} {parseInt(contact.email_count) === 1 ? 'email' : 'emails'}
                     </span>
                   </div>
                 </div>
-                <svg className="w-4 h-4 flex-shrink-0 mt-1" style={{ color: 'var(--color-text-secondary)' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className="w-4 h-4 flex-shrink-0 mt-1" style={{ color: 'var(--text-secondary)' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                 </svg>
               </div>

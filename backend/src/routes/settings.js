@@ -151,4 +151,29 @@ router.post('/test', async (req, res) => {
   }
 });
 
+/**
+ * POST /api/settings/disconnect
+ */
+router.post('/disconnect', (req, res) => {
+  try {
+    const db = getDb();
+    const keysToDelete = ['imap_host', 'imap_port', 'imap_user', 'imap_pass', 'ms_access_token', 'ms_refresh_token', 'ms_token_expires', 'last_sync_time'];
+    const placeholders = keysToDelete.map(() => '?').join(',');
+    
+    // Wipe settings
+    db.run(`DELETE FROM settings WHERE key IN (${placeholders})`, keysToDelete);
+    
+    // Wipe data
+    db.run("DELETE FROM emails");
+    db.run("DELETE FROM contacts");
+    
+    saveDb();
+    console.log(`✅ Disconnected account and wiped tokens and data.`);
+    res.json({ success: true, message: 'Account disconnected and data cleared.' });
+  } catch (error) {
+    console.error('Disconnect error:', error.message);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 module.exports = router;

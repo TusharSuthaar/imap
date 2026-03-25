@@ -22,10 +22,25 @@ function initDatabase() {
         body TEXT,
         received_at TEXT,
         is_processed INTEGER DEFAULT 0,
+        is_read INTEGER DEFAULT 1,
         contact_id INTEGER REFERENCES contacts(id) ON DELETE SET NULL,
+        category TEXT DEFAULT 'Inbox',
+        to_address TEXT,
+        cc_address TEXT,
+        bcc_address TEXT,
         created_at TEXT DEFAULT (datetime('now'))
       )
     `);
+
+    const addColumn = (sql) => {
+      try { db.run(sql); } catch (e) { /* ignore */ }
+    };
+
+    addColumn("ALTER TABLE emails ADD COLUMN category TEXT DEFAULT 'Inbox'");
+    addColumn("ALTER TABLE emails ADD COLUMN to_address TEXT");
+    addColumn("ALTER TABLE emails ADD COLUMN cc_address TEXT");
+    addColumn("ALTER TABLE emails ADD COLUMN bcc_address TEXT");
+    addColumn("ALTER TABLE emails ADD COLUMN is_read INTEGER DEFAULT 1");
 
     db.run(`
       CREATE TABLE IF NOT EXISTS settings (

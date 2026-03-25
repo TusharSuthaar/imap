@@ -21,6 +21,8 @@ const REDIRECT_URI = process.env.MICROSOFT_REDIRECT_URI || 'http://localhost:500
 const SCOPES = [
     'offline_access',
     'https://graph.microsoft.com/IMAP.AccessAsUser.All',
+    'https://graph.microsoft.com/Mail.Read',
+    'https://graph.microsoft.com/Mail.Send',
     'https://graph.microsoft.com/SMTP.Send',
     'https://graph.microsoft.com/User.Read'
 ];
@@ -134,6 +136,6 @@ async function handleMicrosoftCallback(req, res) {
 }
 
 // Handle callback as both GET and POST
-
+router.get('/microsoft/callback', handleMicrosoftCallback);
 router.post('/microsoft/callback', handleMicrosoftCallback);
 module.exports = router;

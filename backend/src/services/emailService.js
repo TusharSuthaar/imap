@@ -2,6 +2,7 @@ const { ImapFlow } = require('imapflow');
 const { simpleParser } = require('mailparser');
 const { getDb, saveDb } = require('../config/db');
 const { getImapConfig } = require('../config/imap');
+const graphClient = require('./graphClient');
 
 /**
  * Helper: run a SELECT and return all rows as objects.
@@ -55,19 +56,31 @@ function storeEmail(parsedEmail) {
   const receivedAt = parsedEmail.date
     ? new Date(parsedEmail.date).toISOString()
     : new Date().toISOString();
+  const category = parsedEmail.category || 'Inbox';
+  const toAddress = parsedEmail.toAddress || '';
+  const ccAddress = parsedEmail.ccAddress || '';
+  const bccAddress = parsedEmail.bccAddress || '';
+  const isRead = parsedEmail.isRead !== undefined ? (parsedEmail.isRead ? 1 : 0) : 1;
 
   // Check for duplicate
   const duplicate = queryOne('SELECT id FROM emails WHERE message_id = ?', [messageId]);
-  if (duplicate) return { skipped: true, messageId };
+  if (duplicate) {
+    // Make sure we update the read/unread status and folder categorization even if email exists
+    try {
+      db.run('UPDATE emails SET is_read = ?, category = ? WHERE id = ?', [isRead, category, duplicate.id]);
+      saveDb();
+    } catch(e) {}
+    return { skipped: true, messageId };
+  }
 
   // Find or create the contact
   const contactId = findOrCreateContact(fromAddress, fromName);
 
   // Insert the email
   db.run(
-    `INSERT INTO emails (message_id, from_email, subject, body, received_at, is_processed, contact_id)
-     VALUES (?, ?, ?, ?, ?, 1, ?)`,
-    [messageId, fromAddress, subject, body, receivedAt, contactId]
+    `INSERT INTO emails (message_id, from_email, subject, body, received_at, is_processed, is_read, contact_id, category, to_address, cc_address, bcc_address)
+     VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)`,
+    [messageId, fromAddress, subject, body, receivedAt, isRead, contactId, category, toAddress, ccAddress, bccAddress]
   );
   saveDb();
 
@@ -88,8 +101,66 @@ async function fetchEmails(limit = 10) {
     );
   }
 
-  const client = new ImapFlow(imapConfig);
   const results = { fetched: 0, skipped: 0, errors: [], emails: [] };
+
+  // If we are using Outlook with an OAuth access token, use Graph REST API instead of IMAP
+  if (imapConfig.host === 'outlook.office365.com' && imapConfig.auth.accessToken) {
+    console.log('🌐 Connecting to Microsoft Graph API');
+    try {
+      const graphMessages = await graphClient.fetchAllEmails(imapConfig.auth.accessToken);
+      console.log(`📨 Found ${graphMessages.length} messages via Graph`);
+
+      for (const msg of graphMessages) {
+        try {
+          // Adapt Graph API JSON to the mailparser format expected by storeEmail
+          const adaptedEmail = {
+            messageId: msg.id,
+            from: {
+              value: [{
+                name: msg.from?.emailAddress?.name || null,
+                address: msg.from?.emailAddress?.address || 'unknown@unknown.com'
+              }]
+            },
+            subject: msg.subject,
+            html: msg.body?.contentType === 'html' ? msg.body.content : undefined,
+            text: msg.body?.contentType === 'text' ? msg.body.content : undefined,
+            date: msg.receivedDateTime ? new Date(msg.receivedDateTime) : new Date(),
+            category: msg.computedFolderName || ((msg.categories && msg.categories.length > 0) ? msg.categories.join(', ') : 'Inbox'),
+            isRead: msg.isRead !== undefined ? msg.isRead : true,
+            toAddress: msg.toRecipients?.map(r => r.emailAddress?.address).filter(Boolean).join(', ') || '',
+            ccAddress: msg.ccRecipients?.map(r => r.emailAddress?.address).filter(Boolean).join(', ') || '',
+            bccAddress: msg.bccRecipients?.map(r => r.emailAddress?.address).filter(Boolean).join(', ') || ''
+          };
+
+          const storeResult = storeEmail(adaptedEmail);
+
+          if (storeResult.skipped) {
+            results.skipped++;
+          } else {
+            results.fetched++;
+            results.emails.push(storeResult.email);
+          }
+
+          // Mark as read in Graph API
+          try {
+            await graphClient.markEmailAsRead(imapConfig.auth.accessToken, msg.id);
+          } catch (flagErr) {
+            console.warn('Could not mark message as read via Graph:', flagErr.message);
+          }
+        } catch (parseErr) {
+          console.error('Error processing Graph email:', parseErr.message);
+          results.errors.push(parseErr.message);
+        }
+      }
+      return results;
+    } catch (error) {
+      console.error('Graph API fetching error:', error.message);
+      throw error;
+    }
+  }
+
+  // Fallback for standard IMAP (Gmail, etc.)
+  const client = new ImapFlow(imapConfig);
 
   try {
     await client.connect();
@@ -165,9 +236,17 @@ function getEmailStats() {
   };
 }
 
+/**
+ * Get a specific single email safely by database ID.
+ */
+function getEmailById(id) {
+  return queryOne('SELECT * FROM emails WHERE id = ?', [id]);
+}
+
 module.exports = {
   fetchEmails,
   getAllEmails,
   getEmailStats,
   findOrCreateContact,
+  getEmailById,
 };

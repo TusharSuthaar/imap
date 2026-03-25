@@ -59,8 +59,13 @@ router.get('/:id', (req, res) => {
     }
 
     const emails = queryAll(
-      'SELECT * FROM emails WHERE contact_id = ? ORDER BY received_at DESC',
-      [parseInt(id)]
+      `SELECT * FROM emails 
+       WHERE contact_id = ? 
+          OR from_email = ?
+          OR to_address LIKE ?
+          OR cc_address LIKE ?
+       ORDER BY received_at DESC`,
+      [parseInt(id), contact.email, `%${contact.email}%`, `%${contact.email}%`]
     );
 
     res.json({

@@ -53,7 +53,14 @@ async function getImapConfig() {
         
         const refreshTokenRequest = {
             refreshToken: msRefreshToken,
-            scopes: ['offline_access', 'https://outlook.office.com/IMAP.AccessAsUser.All', 'https://outlook.office.com/SMTP.Send', 'User.Read']
+            scopes: [
+                'offline_access',
+                'https://graph.microsoft.com/IMAP.AccessAsUser.All',
+                'https://graph.microsoft.com/Mail.Read',
+                'https://graph.microsoft.com/Mail.Send',
+                'https://graph.microsoft.com/SMTP.Send',
+                'https://graph.microsoft.com/User.Read'
+            ]
         };
 
         const response = await cca.acquireTokenByRefreshToken(refreshTokenRequest);
