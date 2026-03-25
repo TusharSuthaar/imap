@@ -1,12 +1,8 @@
 const { ImapFlow } = require('imapflow');
 const { simpleParser } = require('mailparser');
 const { getDb, saveDb } = require('../config/db');
-const { getImapConfig } = require('../config/imap');
 const graphClient = require('./graphClient');
 
-/**
- * Helper: run a SELECT and return all rows as objects.
- */
 function queryAll(sql, params = []) {
   const db = getDb();
   const stmt = db.prepare(sql);
@@ -19,53 +15,38 @@ function queryAll(sql, params = []) {
   return rows;
 }
 
-/**
- * Helper: run a SELECT and return the first row as an object, or null.
- */
 function queryOne(sql, params = []) {
   const rows = queryAll(sql, params);
   return rows.length > 0 ? rows[0] : null;
 }
 
-/**
- * Find or create a contact by email address.
- */
-function findOrCreateContact(email, name) {
+function findOrCreateContact(user_id, email, name) {
   const db = getDb();
-
-  const existing = queryOne('SELECT id FROM contacts WHERE email = ?', [email]);
+  const existing = queryOne('SELECT id FROM contacts WHERE user_id = ? AND email = ?', [user_id, email]);
   if (existing) return existing.id;
 
-  db.run('INSERT INTO contacts (email, name) VALUES (?, ?)', [email, name || null]);
+  db.run('INSERT INTO contacts (user_id, email, name) VALUES (?, ?, ?)', [user_id, email, name || null]);
   saveDb();
-
   const row = queryOne('SELECT last_insert_rowid() as id');
   return row.id;
 }
 
-/**
- * Store a parsed email into the database.
- */
-function storeEmail(parsedEmail) {
+function storeEmail(user_id, parsedEmail) {
   const db = getDb();
   const messageId = parsedEmail.messageId || `generated-${Date.now()}-${Math.random()}`;
   const fromAddress = parsedEmail.from?.value?.[0]?.address || 'unknown@unknown.com';
   const fromName = parsedEmail.from?.value?.[0]?.name || null;
   const subject = parsedEmail.subject || '(No Subject)';
   const body = parsedEmail.text || parsedEmail.html || '';
-  const receivedAt = parsedEmail.date
-    ? new Date(parsedEmail.date).toISOString()
-    : new Date().toISOString();
+  const receivedAt = parsedEmail.date ? new Date(parsedEmail.date).toISOString() : new Date().toISOString();
   const category = parsedEmail.category || 'Inbox';
   const toAddress = parsedEmail.toAddress || '';
   const ccAddress = parsedEmail.ccAddress || '';
   const bccAddress = parsedEmail.bccAddress || '';
   const isRead = parsedEmail.isRead !== undefined ? (parsedEmail.isRead ? 1 : 0) : 1;
 
-  // Check for duplicate
-  const duplicate = queryOne('SELECT id FROM emails WHERE message_id = ?', [messageId]);
+  const duplicate = queryOne('SELECT id FROM emails WHERE user_id = ? AND message_id = ?', [user_id, messageId]);
   if (duplicate) {
-    // Make sure we update the read/unread status and folder categorization even if email exists
     try {
       db.run('UPDATE emails SET is_read = ?, category = ? WHERE id = ?', [isRead, category, duplicate.id]);
       saveDb();
@@ -73,178 +54,135 @@ function storeEmail(parsedEmail) {
     return { skipped: true, messageId };
   }
 
-  // Find or create the contact
-  const contactId = findOrCreateContact(fromAddress, fromName);
+  const contactId = findOrCreateContact(user_id, fromAddress, fromName);
 
-  // Insert the email
   db.run(
-    `INSERT INTO emails (message_id, from_email, subject, body, received_at, is_processed, is_read, contact_id, category, to_address, cc_address, bcc_address)
-     VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)`,
-    [messageId, fromAddress, subject, body, receivedAt, isRead, contactId, category, toAddress, ccAddress, bccAddress]
+    `INSERT INTO emails (user_id, message_id, from_email, subject, body, received_at, is_processed, is_read, contact_id, category, to_address, cc_address, bcc_address)
+     VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)`,
+    [user_id, messageId, fromAddress, subject, body, receivedAt, isRead, contactId, category, toAddress, ccAddress, bccAddress]
   );
   saveDb();
 
   const row = queryOne('SELECT last_insert_rowid() as id');
-  const email = queryOne('SELECT * FROM emails WHERE id = ?', [row.id]);
-  return { skipped: false, email };
+  const emailRow = queryOne('SELECT * FROM emails WHERE id = ?', [row.id]);
+  return { skipped: false, email: emailRow };
 }
 
 /**
- * Fetch the last N unseen emails from the IMAP inbox.
+ * Fetch and sync emails for a specific user using their MS Token
  */
-async function fetchEmails(limit = 10) {
-  const imapConfig = await getImapConfig();
-
-  if (!imapConfig.auth.user || (!imapConfig.auth.pass && !imapConfig.auth.accessToken)) {
-    throw new Error(
-      'IMAP credentials not configured. Go to Settings to add your email account.'
-    );
-  }
+async function syncUserEmails(user) {
+  if (!user.ms_access_token) return { fetched: 0, skipped: 0, errors: [] };
 
   const results = { fetched: 0, skipped: 0, errors: [], emails: [] };
-
-  // If we are using Outlook with an OAuth access token, use Graph REST API instead of IMAP
-  if (imapConfig.host === 'outlook.office365.com' && imapConfig.auth.accessToken) {
-    console.log('🌐 Connecting to Microsoft Graph API');
-    try {
-      const graphMessages = await graphClient.fetchAllEmails(imapConfig.auth.accessToken);
-      console.log(`📨 Found ${graphMessages.length} messages via Graph`);
-
-      for (const msg of graphMessages) {
-        try {
-          // Adapt Graph API JSON to the mailparser format expected by storeEmail
-          const adaptedEmail = {
-            messageId: msg.id,
-            from: {
-              value: [{
-                name: msg.from?.emailAddress?.name || null,
-                address: msg.from?.emailAddress?.address || 'unknown@unknown.com'
-              }]
-            },
-            subject: msg.subject,
-            html: msg.body?.contentType === 'html' ? msg.body.content : undefined,
-            text: msg.body?.contentType === 'text' ? msg.body.content : undefined,
-            date: msg.receivedDateTime ? new Date(msg.receivedDateTime) : new Date(),
-            category: msg.computedFolderName || ((msg.categories && msg.categories.length > 0) ? msg.categories.join(', ') : 'Inbox'),
-            isRead: msg.isRead !== undefined ? msg.isRead : true,
-            toAddress: msg.toRecipients?.map(r => r.emailAddress?.address).filter(Boolean).join(', ') || '',
-            ccAddress: msg.ccRecipients?.map(r => r.emailAddress?.address).filter(Boolean).join(', ') || '',
-            bccAddress: msg.bccRecipients?.map(r => r.emailAddress?.address).filter(Boolean).join(', ') || ''
-          };
-
-          const storeResult = storeEmail(adaptedEmail);
-
-          if (storeResult.skipped) {
-            results.skipped++;
-          } else {
-            results.fetched++;
-            results.emails.push(storeResult.email);
-          }
-
-          // Mark as read in Graph API
-          try {
-            await graphClient.markEmailAsRead(imapConfig.auth.accessToken, msg.id);
-          } catch (flagErr) {
-            console.warn('Could not mark message as read via Graph:', flagErr.message);
-          }
-        } catch (parseErr) {
-          console.error('Error processing Graph email:', parseErr.message);
-          results.errors.push(parseErr.message);
-        }
-      }
-      return results;
-    } catch (error) {
-      console.error('Graph API fetching error:', error.message);
-      throw error;
-    }
-  }
-
-  // Fallback for standard IMAP (Gmail, etc.)
-  const client = new ImapFlow(imapConfig);
-
+  
   try {
-    await client.connect();
-    console.log('📧 Connected to IMAP server');
+    const graphMessages = await graphClient.fetchAllEmails(user.ms_access_token);
 
-    const lock = await client.getMailboxLock('INBOX');
+    for (const msg of graphMessages) {
+      try {
+        const adaptedEmail = {
+          messageId: msg.id,
+          from: {
+            value: [{
+              name: msg.from?.emailAddress?.name || null,
+              address: msg.from?.emailAddress?.address || 'unknown@unknown.com'
+            }]
+          },
+          subject: msg.subject,
+          html: msg.body?.contentType === 'html' ? msg.body.content : undefined,
+          text: msg.body?.contentType === 'text' ? msg.body.content : undefined,
+          date: msg.receivedDateTime ? new Date(msg.receivedDateTime) : new Date(),
+          category: msg.computedFolderName || ((msg.categories && msg.categories.length > 0) ? msg.categories.join(', ') : 'Inbox'),
+          isRead: msg.isRead !== undefined ? msg.isRead : true,
+          toAddress: msg.toRecipients?.map(r => r.emailAddress?.address).filter(Boolean).join(', ') || '',
+          ccAddress: msg.ccRecipients?.map(r => r.emailAddress?.address).filter(Boolean).join(', ') || '',
+          bccAddress: msg.bccRecipients?.map(r => r.emailAddress?.address).filter(Boolean).join(', ') || ''
+        };
 
-    try {
-      const messages = [];
-      for await (const msg of client.fetch(
-        { seen: false },
-        { source: true, uid: true },
-        { changedSince: 0 }
-      )) {
-        messages.push(msg);
-        if (messages.length >= limit) break;
-      }
+        const storeResult = storeEmail(user.id, adaptedEmail);
 
-      console.log(`📨 Found ${messages.length} unseen messages`);
-
-      for (const msg of messages) {
-        try {
-          const parsed = await simpleParser(msg.source);
-          const storeResult = storeEmail(parsed);
-
-          if (storeResult.skipped) {
-            results.skipped++;
-          } else {
-            results.fetched++;
-            results.emails.push(storeResult.email);
-          }
-
-          try {
-            await client.messageFlagsAdd({ uid: msg.uid }, ['\\Seen']);
-          } catch (flagErr) {
-            console.warn('Could not mark message as read:', flagErr.message);
-          }
-        } catch (parseErr) {
-          console.error('Error parsing email:', parseErr.message);
-          results.errors.push(parseErr.message);
+        if (storeResult.skipped) {
+          results.skipped++;
+        } else {
+          results.fetched++;
+          results.emails.push(storeResult.email);
         }
-      }
-    } finally {
-      lock.release();
-    }
 
-    await client.logout();
-    console.log('📧 Disconnected from IMAP server');
+        try {
+          await graphClient.markEmailAsRead(user.ms_access_token, msg.id);
+        } catch (flagErr) {}
+      } catch (parseErr) {
+        results.errors.push(parseErr.message);
+      }
+    }
+    
+    // Log Sync Event if items fetched
+    if (results.fetched > 0) {
+      const db = getDb();
+      db.run("INSERT INTO audit_logs (user_id, action, entity_type, details) VALUES (?, 'SYNC', 'emails', ?)", 
+        [user.id, `Synced ${results.fetched} new emails from Microsoft Graph`]);
+      saveDb();
+    }
+    
+    return results;
   } catch (error) {
-    console.error('IMAP connection error:', error.message);
+    console.error(`Graph API fetching error for user ${user.id}:`, error.message);
     throw error;
   }
-
-  return results;
 }
 
-/**
- * Get all stored emails, newest first.
- */
-function getAllEmails() {
-  return queryAll('SELECT * FROM emails ORDER BY received_at DESC');
+function getAllEmails(user_id) {
+  return queryAll('SELECT * FROM emails WHERE user_id = ? ORDER BY received_at DESC', [user_id]);
 }
 
-/**
- * Get email statistics.
- */
-function getEmailStats() {
-  const total = queryOne('SELECT COUNT(*) as count FROM emails');
-  const unprocessed = queryOne('SELECT COUNT(*) as count FROM emails WHERE is_processed = 0');
+function getEmailStats(user_id) {
+  const total = queryOne('SELECT COUNT(*) as count FROM emails WHERE user_id = ?', [user_id]);
+  const unprocessed = queryOne('SELECT COUNT(*) as count FROM emails WHERE user_id = ? AND is_processed = 0', [user_id]);
   return {
     total: total ? total.count : 0,
     unprocessed: unprocessed ? unprocessed.count : 0,
   };
 }
 
+function getEmailById(user_id, email_id) {
+  return queryOne('SELECT * FROM emails WHERE id = ? AND user_id = ?', [email_id, user_id]);
+}
+
 /**
- * Get a specific single email safely by database ID.
+ * Start a background process to sync emails for all connected users
  */
-function getEmailById(id) {
-  return queryOne('SELECT * FROM emails WHERE id = ?', [id]);
+function startEmailSync() {
+  const syncInterval = process.env.SYNC_INTERVAL || 60000;
+  
+  console.log(`⏱️ Starting Multi-User Email Sync Engine (Interval: ${syncInterval}ms)`);
+  setInterval(async () => {
+    try {
+      const db = getDb();
+      const stmt = db.prepare("SELECT * FROM users WHERE ms_access_token IS NOT NULL");
+      
+      const activeUsers = [];
+      while (stmt.step()) {
+        activeUsers.push(stmt.getAsObject());
+      }
+      stmt.free();
+
+      for (const user of activeUsers) {
+        try {
+          await syncUserEmails(user);
+        } catch (syncErr) {
+          console.error(`Background sync failed for user ${user.id} (${user.email}):`, syncErr.message);
+        }
+      }
+    } catch (dbErr) {
+      console.error('Email Sync Engine DB error:', dbErr.message);
+    }
+  }, syncInterval);
 }
 
 module.exports = {
-  fetchEmails,
+  syncUserEmails,
+  startEmailSync,
   getAllEmails,
   getEmailStats,
   findOrCreateContact,

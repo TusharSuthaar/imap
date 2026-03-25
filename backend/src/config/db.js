@@ -2,7 +2,7 @@ const initSqlJs = require('sql.js');
 const fs = require('fs');
 const path = require('path');
 
-const dbPath = path.join(__dirname, '..', '..', 'data', 'epm_crm.db');
+const dbPath = process.env.DB_PATH || path.join(__dirname, '..', '..', 'data', 'epm_crm.db');
 const dataDir = path.dirname(dbPath);
 
 // Ensure data directory exists

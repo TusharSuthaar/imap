@@ -9,6 +9,17 @@ const nav = [
 export default function Sidebar() {
   const location = useLocation();
 
+  let user = null;
+  try {
+    const token = localStorage.getItem('token');
+    if (token) user = JSON.parse(atob(token.split('.')[1]));
+  } catch (e) {}
+
+  const handleSignOut = () => {
+    localStorage.removeItem('token');
+    window.location.href = '/login';
+  };
+
   return (
     <aside className="fixed left-0 top-0 h-screen flex flex-col items-center py-4 z-50"
       style={{ width: 'var(--sidebar-w)', background: 'var(--bg-sidebar)' }}>
@@ -38,8 +49,23 @@ export default function Sidebar() {
         })}
       </nav>
 
-      {/* Status */}
-      <div className="w-2 h-2 rounded-full mb-2" style={{ background: 'var(--success)' }} title="Connected" />
+      {/* Bottom Actions: User & Sign Out */}
+      <div className="mt-auto flex flex-col items-center gap-4">
+        {/* User Avatar */}
+        <div className="w-8 h-8 rounded-full flex items-center justify-center text-[10px] font-bold text-white mb-2"
+          style={{ background: 'var(--brand)' }}
+          title={user?.name || user?.email || 'User'}>
+          {user?.name ? user.name.charAt(0).toUpperCase() : 'U'}
+        </div>
+
+        {/* Sign Out Button */}
+        <button onClick={handleSignOut} title="Sign Out"
+          className="w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-150 text-gray-400 hover:text-white hover:bg-red-500">
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.6}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+          </svg>
+        </button>
+      </div>
     </aside>
   );
 }

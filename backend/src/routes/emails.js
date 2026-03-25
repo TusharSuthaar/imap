@@ -1,25 +1,37 @@
 const express = require('express');
 const router = express.Router();
-const { fetchEmails, getAllEmails, getEmailStats } = require('../services/emailService');
+const { verifyToken } = require('../middleware/auth');
+const { syncUserEmails, getAllEmails, getEmailStats, getEmailById } = require('../services/emailService');
+const { getDb } = require('../config/db');
+
+// Secure all email routes with JWT auth
+router.use(verifyToken);
 
 /**
- * GET /api/emails/fetch
- * Trigger IMAP fetch of unseen emails.
+ * GET /api/emails/sync
+ * Trigger Graph fetch of unseen emails for the logged-in user.
  */
-router.get('/fetch', async (req, res) => {
+router.get('/sync', async (req, res) => {
   try {
-    const results = await fetchEmails(10);
+    const db = getDb();
+    const userStmt = db.prepare("SELECT * FROM users WHERE id = ?");
+    userStmt.bind([req.user.id]);
+    const user = userStmt.step() ? userStmt.getAsObject() : null;
+    userStmt.free();
+
+    if (!user || !user.ms_access_token) {
+      return res.status(401).json({ success: false, message: 'Microsoft Account not connected for this user' });
+    }
+
+    const results = await syncUserEmails(user);
     res.json({
       success: true,
       message: `Fetched ${results.fetched} new emails, skipped ${results.skipped} duplicates`,
       data: results,
     });
   } catch (error) {
-    console.error('Fetch emails error:', error.message);
-    res.status(500).json({
-      success: false,
-      message: error.message,
-    });
+    console.error(`Sync error for user ${req.user.id}:`, error.message);
+    res.status(500).json({ success: false, message: error.message });
   }
 });
 
@@ -35,15 +47,22 @@ router.post('/send', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Missing fields: to, subject' });
     }
 
-    const { getImapConfig } = require('../config/imap');
-    const graphClient = require('../services/graphClient');
-    const config = await getImapConfig();
+    const db = getDb();
+    const userStmt = db.prepare("SELECT ms_access_token FROM users WHERE id = ?");
+    userStmt.bind([req.user.id]);
+    const user = userStmt.step() ? userStmt.getAsObject() : null;
+    userStmt.free();
 
-    if (config.host === 'outlook.office365.com' && config.auth.accessToken) {
-      await graphClient.sendEmail(config.auth.accessToken, { to, cc, bcc, subject, content: body || ' ', attachments: attachments || [] });
+    if (user && user.ms_access_token) {
+      const graphClient = require('../services/graphClient');
+      await graphClient.sendEmail(user.ms_access_token, { to, cc, bcc, subject, content: body || ' ', attachments: attachments || [] });
+      
+      db.run("INSERT INTO audit_logs (user_id, action, entity_type, details) VALUES (?, 'SEND', 'emails', ?)", 
+        [req.user.id, `Sent email to ${to}`]);
+      
       res.json({ success: true, message: 'Email sent successfully via Graph API' });
     } else {
-      res.status(501).json({ success: false, message: 'Sending currently only supported for configured Microsoft accounts' });
+      res.status(501).json({ success: false, message: 'Sending currently only supported for connected Microsoft accounts' });
     }
   } catch (error) {
     console.error('Send email error:', error.message);
@@ -53,11 +72,11 @@ router.post('/send', async (req, res) => {
 
 /**
  * GET /api/emails
- * Return all stored emails.
+ * Return all stored emails for the authenticated user.
  */
-router.get('/', async (req, res) => {
+router.get('/', (req, res) => {
   try {
-    const emails = await getAllEmails();
+    const emails = getAllEmails(req.user.id);
     res.json({ success: true, data: emails });
   } catch (error) {
     console.error('Get emails error:', error.message);
@@ -67,11 +86,11 @@ router.get('/', async (req, res) => {
 
 /**
  * GET /api/emails/stats
- * Return email statistics.
+ * Return email statistics for the user.
  */
-router.get('/stats', async (req, res) => {
+router.get('/stats', (req, res) => {
   try {
-    const stats = await getEmailStats();
+    const stats = getEmailStats(req.user.id);
     res.json({ success: true, data: stats });
   } catch (error) {
     console.error('Get stats error:', error.message);
@@ -81,15 +100,12 @@ router.get('/stats', async (req, res) => {
 
 /**
  * GET /api/emails/:id
- * Return a specific email body based on ID.
+ * Return a specific email body based on ID for the user.
  */
-router.get('/:id', async (req, res) => {
+router.get('/:id', (req, res) => {
   try {
-    const { getEmailById } = require('../services/emailService');
-    const email = await getEmailById(req.params.id);
-    if (!email) {
-      return res.status(404).json({ success: false, message: 'Email not found.'});
-    }
+    const email = getEmailById(req.user.id, req.params.id);
+    if (!email) return res.status(404).json({ success: false, message: 'Email not found.'});
     res.json({ success: true, data: email });
   } catch (error) {
     console.error('Get email error:', error.message);
@@ -99,33 +115,27 @@ router.get('/:id', async (req, res) => {
 
 /**
  * GET /api/emails/:id/attachments
- * Fetch attachments for an email from Graph API.
- * Returns inline images as data URIs and file attachments as downloadable objects.
+ * Fetch attachments for a user's email from Graph API.
  */
 router.get('/:id/attachments', async (req, res) => {
   try {
-    const { getEmailById } = require('../services/emailService');
-    const email = await getEmailById(req.params.id);
-    if (!email) {
-      return res.status(404).json({ success: false, message: 'Email not found.' });
-    }
+    const email = getEmailById(req.user.id, req.params.id);
+    if (!email) return res.status(404).json({ success: false, message: 'Email not found.' });
 
-    const { getImapConfig } = require('../config/imap');
-    const graphClient = require('../services/graphClient');
-    const config = await getImapConfig();
+    const db = getDb();
+    const userStmt = db.prepare("SELECT ms_access_token FROM users WHERE id = ?");
+    userStmt.bind([req.user.id]);
+    const user = userStmt.step() ? userStmt.getAsObject() : null;
+    userStmt.free();
 
-    if (!config.auth?.accessToken) {
+    if (!user || !user.ms_access_token) {
       return res.json({ success: true, attachments: [], body: email.body });
     }
 
-    // Fetch attachments from Graph API using the original message_id
-    const attachments = await graphClient.getEmailAttachments(config.auth.accessToken, email.message_id);
-    console.log("Graph API Attachments:", attachments.map(a => ({ name: a.name, isInline: a.isInline, contentId: a.contentId, hasBytes: !!a.contentBytes })));
+    const graphClient = require('../services/graphClient');
+    const attachments = await graphClient.getEmailAttachments(user.ms_access_token, email.message_id);
 
-    // Replace cid: references in body with inline base64 data URIs
     let processedBody = email.body || '';
-    
-    // Some inline attachments might have isInline: false, so we just check for contentId.
     const inlineAtts = attachments.filter(a => a.contentId && a.contentBytes);
     for (const att of inlineAtts) {
       const cidClean = att.contentId.replace(/[<>]/g, '');
@@ -136,27 +146,16 @@ router.get('/:id/attachments', async (req, res) => {
       processedBody = processedBody.replace(regex, dataUri);
     }
 
-    // Return non-inline attachments for download display. 
-    // We filter out attachments that were actually referenced in the HTML body as CIDs.
     const downloadableAtts = attachments.filter(a => {
-       if (!a.contentId) return !a.isInline;
-       const cidClean = a.contentId.replace(/[<>]/g, '');
-       return processedBody.indexOf(`data:${a.contentType || 'image/png'};base64,`) === -1 && !a.isInline;
-    }).map(a => ({
-      name: a.name,
-      contentType: a.contentType,
-      size: a.size,
-      dataUri: a.contentBytes ? `data:${a.contentType};base64,${a.contentBytes}` : null,
-    }));
-
-    res.json({
-      success: true,
-      body: processedBody,
-      attachments: downloadableAtts,
+      if (a.isInline === true && a.contentId && processedBody.includes(a.contentId.replace(/[<>]/g, ''))) return false;
+      if (!a.isInline && a.contentId && processedBody.includes(a.contentId.replace(/[<>]/g, ''))) return false;
+      return true;
     });
+
+    res.json({ success: true, attachments: downloadableAtts, body: processedBody });
   } catch (error) {
-    console.error('Get attachments error:', error.message);
-    res.status(500).json({ success: false, message: error.message });
+    console.error('Attachment fetch error:', error.message);
+    res.status(500).json({ success: false, message: 'Failed to fetch external attachments' });
   }
 });
 

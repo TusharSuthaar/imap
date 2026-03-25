@@ -100,38 +100,55 @@ async function handleMicrosoftCallback(req, res) {
 
         const expiresOn = response.expiresOn ? response.expiresOn.getTime() : (Date.now() + 3599 * 1000);
 
-        // Store into SQLite settings table
         const db = getDb();
-
-        const settingsToUpdate = {
-            'imap_host': 'outlook.office365.com',
-            'imap_port': '993',
-            'imap_user': email,
-            'ms_access_token': accessToken,
-            'ms_refresh_token': refreshToken,
-            'ms_token_expires': expiresOn.toString()
-        };
-
-        for (const [key, value] of Object.entries(settingsToUpdate)) {
-            db.run(`UPDATE settings SET value = ?, updated_at = datetime('now') WHERE key = ?`, [value, key]);
-            const stmt = db.prepare(`SELECT id FROM settings WHERE key = ?`);
-            stmt.bind([key]);
-            const exists = stmt.step();
-            stmt.free();
-
-            if (!exists) {
-                db.run(`INSERT INTO settings (key, value) VALUES (?, ?)`, [key, value]);
-            }
+        const { generateToken } = require('../middleware/auth');
+        
+        const name = response.account?.name || email.split('@')[0];
+        
+        // 1. Check if user exists
+        const checkUserStmt = db.prepare("SELECT id FROM users WHERE email = ?");
+        checkUserStmt.bind([email]);
+        let user_id;
+        
+        if (checkUserStmt.step()) {
+            user_id = checkUserStmt.getAsObject().id;
+            // Update tokens
+            db.run(`UPDATE users SET ms_access_token = ?, ms_refresh_token = ?, ms_token_expires = ?, updated_at = datetime('now') WHERE id = ?`, 
+                [accessToken, refreshToken, expiresOn.toString(), user_id]);
+        } else {
+            // Insert new user
+            db.run(`INSERT INTO users (name, email, ms_access_token, ms_refresh_token, ms_token_expires) VALUES (?, ?, ?, ?, ?)`,
+                [name, email, accessToken, refreshToken, expiresOn.toString()]);
+                
+            // Get inserted ID
+            const getInsertId = db.prepare("SELECT last_insert_rowid() AS id");
+            if (getInsertId.step()) user_id = getInsertId.getAsObject().id;
+            getInsertId.free();
         }
+        checkUserStmt.free();
 
+        // 2. Audit Log
+        db.run(`INSERT INTO audit_logs (user_id, action, entity_type, entity_id, details) VALUES (?, 'LOGIN', 'user', ?, ?)`,
+            [user_id, user_id.toString(), 'User authenticated and synced via Microsoft OAuth']);
+            
         saveDb();
-        console.log(`✅ Microsoft OAuth setup successful for ${email}`);
+        console.log(`✅ Microsoft OAuth Setup successful for user ${email}.`);
 
-        // Redirect back to frontend
-        res.redirect('http://localhost:5173/settings?msal_success=true');
+        // 3. Generate JWT and redirect
+        const token = generateToken({ id: user_id, email, name });
+        const protocol = req.headers['x-forwarded-proto'] || 'http';
+        const host = req.headers['host'];
+        const origin = `${protocol}://${host}`;
+        
+        // For local dev, we might still want localhost:5173 if not served together, 
+        // but since we are serving dist files now, the same host works for both.
+        res.redirect(`${origin}/login?token=${token}`);
+        
     } catch (error) {
         console.error('Error during Microsoft Auth Callback:', error);
-        res.redirect('http://localhost:5173/settings?msal_error=true');
+        const protocol = req.headers['x-forwarded-proto'] || 'http';
+        const host = req.headers['host'];
+        res.redirect(`${protocol}://${host}/login?msal_error=true&error_desc=${encodeURIComponent(error.message || 'Unknown error')}`);
     }
 }
 

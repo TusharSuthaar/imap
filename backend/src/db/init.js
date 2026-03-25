@@ -4,19 +4,38 @@ function initDatabase() {
   try {
     const db = getDb();
 
+    // Users table
     db.run(`
-      CREATE TABLE IF NOT EXISTS contacts (
+      CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        email TEXT UNIQUE NOT NULL,
         name TEXT,
-        created_at TEXT DEFAULT (datetime('now'))
+        email TEXT UNIQUE NOT NULL,
+        ms_access_token TEXT,
+        ms_refresh_token TEXT,
+        ms_token_expires TEXT,
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now'))
       )
     `);
 
+    // Contacts table
+    db.run(`
+      CREATE TABLE IF NOT EXISTS contacts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        email TEXT NOT NULL,
+        name TEXT,
+        created_at TEXT DEFAULT (datetime('now')),
+        UNIQUE(user_id, email)
+      )
+    `);
+
+    // Emails table
     db.run(`
       CREATE TABLE IF NOT EXISTS emails (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        message_id TEXT UNIQUE NOT NULL,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        message_id TEXT NOT NULL,
         from_email TEXT NOT NULL,
         subject TEXT,
         body TEXT,
@@ -28,20 +47,25 @@ function initDatabase() {
         to_address TEXT,
         cc_address TEXT,
         bcc_address TEXT,
+        created_at TEXT DEFAULT (datetime('now')),
+        UNIQUE(user_id, message_id)
+      )
+    `);
+
+    // Audit logs table
+    db.run(`
+      CREATE TABLE IF NOT EXISTS audit_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        action TEXT NOT NULL,
+        entity_type TEXT,
+        entity_id TEXT,
+        details TEXT,
         created_at TEXT DEFAULT (datetime('now'))
       )
     `);
 
-    const addColumn = (sql) => {
-      try { db.run(sql); } catch (e) { /* ignore */ }
-    };
-
-    addColumn("ALTER TABLE emails ADD COLUMN category TEXT DEFAULT 'Inbox'");
-    addColumn("ALTER TABLE emails ADD COLUMN to_address TEXT");
-    addColumn("ALTER TABLE emails ADD COLUMN cc_address TEXT");
-    addColumn("ALTER TABLE emails ADD COLUMN bcc_address TEXT");
-    addColumn("ALTER TABLE emails ADD COLUMN is_read INTEGER DEFAULT 1");
-
+    // Settings table (Global settings like OAuth Client ID overrides if needed)
     db.run(`
       CREATE TABLE IF NOT EXISTS settings (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -51,15 +75,20 @@ function initDatabase() {
       )
     `);
 
-    db.run(`CREATE INDEX IF NOT EXISTS idx_emails_contact_id ON emails(contact_id)`);
-    db.run(`CREATE INDEX IF NOT EXISTS idx_emails_from_email ON emails(from_email)`);
-    db.run(`CREATE INDEX IF NOT EXISTS idx_contacts_email ON contacts(email)`);
+    // Indexes
+    const addIndex = (sql) => {
+      try { db.run(sql); } catch (e) { /* ignore if exists */ }
+    };
+    addIndex("CREATE INDEX idx_emails_contact_id ON emails(contact_id)");
+    addIndex("CREATE INDEX idx_emails_from_email ON emails(from_email)");
+    addIndex("CREATE INDEX idx_emails_user_id ON emails(user_id)");
+    addIndex("CREATE INDEX idx_contacts_user_id ON contacts(user_id)");
+    addIndex("CREATE INDEX idx_audit_logs_user_id ON audit_logs(user_id)");
 
     saveDb();
     console.log('✅ Database tables initialized successfully');
   } catch (error) {
-    console.error('❌ Failed to initialize database:', error.message);
-    throw error;
+    console.error('❌ Database initialization failed:', error.message);
   }
 }
 

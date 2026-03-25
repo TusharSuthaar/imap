@@ -43,7 +43,7 @@ export default function Settings() {
     finally { setTesting(false); }
   };
 
-  const handleConnect = () => { window.location.href = 'http://localhost:5000/api/auth/microsoft'; };
+  const handleConnect = () => { window.location.href = '/api/auth/microsoft'; };
 
   if (loading) return <div className="animate-fade-in"><div className="skeleton h-8 w-48 mb-6" /><div className="skeleton h-72 w-full max-w-xl rounded-2xl" /></div>;
 

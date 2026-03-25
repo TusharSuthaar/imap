@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: epm-crm-mail-sync
+    env: node
+    plan: free
+    buildCommand: npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_VERSION
+        value: 18.16.0
+      - key: DB_PATH
+        value: /var/data/epm_crm.db
+      - key: JWT_SECRET
+        generateValue: true
+      - key: MICROSOFT_REDIRECT_URI
+        fromContext: instance_url
+        path: /api/auth/microsoft/callback
+    disk:
+      name: sqlite-data
+      mountPath: /var/data
+      sizeGB: 1

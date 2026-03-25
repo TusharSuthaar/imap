@@ -1,10 +1,8 @@
 const express = require('express');
 const router = express.Router();
-const { getDb, saveDb } = require('../config/db');
+const { verifyToken } = require('../middleware/auth');
+const { getDb } = require('../config/db');
 
-/**
- * Helper: run a SELECT and return all rows as objects.
- */
 function queryAll(sql, params = []) {
   const db = getDb();
   const stmt = db.prepare(sql);
@@ -22,6 +20,9 @@ function queryOne(sql, params = []) {
   return rows.length > 0 ? rows[0] : null;
 }
 
+// Secure routes
+router.use(verifyToken);
+
 /**
  * GET /api/contacts
  */
@@ -36,9 +37,10 @@ router.get('/', (req, res) => {
         COUNT(e.id) AS email_count
       FROM contacts c
       LEFT JOIN emails e ON c.id = e.contact_id
+      WHERE c.user_id = ?
       GROUP BY c.id
       ORDER BY c.created_at DESC
-    `);
+    `, [req.user.id]);
     res.json({ success: true, data: rows });
   } catch (error) {
     console.error('Get contacts error:', error.message);
@@ -53,27 +55,31 @@ router.get('/:id', (req, res) => {
   try {
     const { id } = req.params;
 
-    const contact = queryOne('SELECT * FROM contacts WHERE id = ?', [parseInt(id)]);
+    const contact = queryOne('SELECT * FROM contacts WHERE id = ? AND user_id = ?', [parseInt(id), req.user.id]);
     if (!contact) {
       return res.status(404).json({ success: false, message: 'Contact not found' });
     }
 
-    const emails = queryAll(
-      `SELECT * FROM emails 
-       WHERE contact_id = ? 
-          OR from_email = ?
-          OR to_address LIKE ?
-          OR cc_address LIKE ?
-       ORDER BY received_at DESC`,
-      [parseInt(id), contact.email, `%${contact.email}%`, `%${contact.email}%`]
-    );
+    const unreadCountRow = queryOne('SELECT COUNT(*) as count FROM emails WHERE contact_id = ? AND is_read = 0 AND user_id = ?', [contact.id, req.user.id]);
+    const unreadCount = unreadCountRow ? unreadCountRow.count : 0;
 
-    res.json({
-      success: true,
-      data: { contact, emails },
+    const emails = queryAll(`
+      SELECT id, message_id, subject, body, received_at, is_read, category
+      FROM emails 
+      WHERE contact_id = ? AND user_id = ?
+      ORDER BY received_at DESC
+    `, [contact.id, req.user.id]);
+
+    res.json({ 
+      success: true, 
+      data: {
+        ...contact,
+        unread_count: unreadCount,
+        emails
+      }
     });
   } catch (error) {
-    console.error('Get contact detail error:', error.message);
+    console.error('Get contact error:', error.message);
     res.status(500).json({ success: false, message: error.message });
   }
 });
